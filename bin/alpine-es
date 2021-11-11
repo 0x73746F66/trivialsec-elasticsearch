@@ -1,0 +1,178 @@
+#!/bin/sh
+# <UDF name="FQDN" label="The hostname for the new Linode." />
+# <UDF name="AWS_ACCESS_KEY_ID" Label="AWS API Key ID" />
+# <UDF name="AWS_SECRET_ACCESS_KEY" Label="AWS Secret Access Key" />
+# <UDF name="AWS_REGION" Label="AWS Region" />
+# <UDF name="ELASTIC_PASSWORD" Label="Elasticsearch password" />
+# <UDF name="ES_PORT" Label="Elasticsearch port" />
+# <UDF name="ES_JAVA_OPTS" Label="Elasticsearch JAVA_OPTS" />
+# <UDF name="VERSION" Label="Elasticsearch version" />
+# <UDF name="ES_SHA512" Label="Elasticsearch checsum" />
+# <UDF name="GPG_KEY" Label="Elasticsearch GPG_KEY" />
+
+set -ex
+exec >/root/stackscript.log 2>&1
+echo "Linode Variable Values:  LINODE_ID: $LINODE_ID,  LINODE_LISHUSERNAME: $LINODE_LISHUSERNAME,  LINODE_RAM: $LINODE_RAM,  LINODE_DATACENTERID:$LINODE_DATACENTERID"
+source <ssinclude StackScriptID="929970">
+
+function add_packages() {
+    echo "Adding packages..."
+    apk -q add --update ca-certificates openssl lsof procps
+    update-ca-certificates --fresh
+}
+function setup_aws() {
+    install_awscli
+    echo "Setup awscli..."
+    mkdir ~/.aws
+  cat > ~/.aws/config <<CONFIG
+[default]
+region = ${AWS_REGION}
+CONFIG
+  cat > ~/.aws/credentials <<CREDS
+[default]
+aws_access_key_id = ${AWS_ACCESS_KEY_ID}
+aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}
+CREDS
+    # Test AWS Credentials stored in Env vars
+    echo $(aws sts get-caller-identity)
+}
+function install_es() {
+    echo "Installing elasticsearch..."
+
+}
+function es_configure() {
+    echo "Configuring elasticsearch..."
+    apk -q add --update gnupg wget openjdk11-jre-headless bash su-exec
+    export ES_JAVA_HOME=$(dirname "$(dirname "$(readlink -f "$(which javac || which java)")")")
+    echo "export ES_JAVA_HOME=$ES_JAVA_HOME" >> ~/.profile
+    local cwd=$(pwd)
+    cd /tmp
+    mkdir -p /run/elasticsearch /var/lib/elasticsearch /var/log/elasticsearch
+    local DOWNLOAD_URL="https://artifacts.elastic.co/downloads/elasticsearch"
+    local ES_TARBAL="${DOWNLOAD_URL}/elasticsearch-${VERSION}-no-jdk-linux-x86_64.tar.gz"
+    local ES_TARBALL_ASC="${DOWNLOAD_URL}/elasticsearch-${VERSION}-no-jdk-linux-x86_64.tar.gz.asc"
+
+    wget -q -O elasticsearch.tar.gz "$ES_TARBAL"
+    if [ "$ES_TARBALL_SHA" ]; then
+      echo "$ES_TARBALL_SHA *elasticsearch.tar.gz" | sha512sum -c -
+    fi
+    wget -q -O elasticsearch.tar.gz.asc "$ES_TARBALL_ASC"
+    gpg --batch --quick-generate-key --passphrase="$ELASTIC_PASSWORD" "$FQDN" rsa1024 cert never
+    gpg -v --keyserver ha.pool.sks-keyservers.net --recv-keys "$GPG_KEY" \
+      || gpg -v --keyserver p80.pool.sks-keyservers.net --recv-keys "$GPG_KEY" \
+      || gpg -v --keyserver pgp.mit.edu --recv-keys "$GPG_KEY" \
+      || gpg -v --keyserver pgpkeys.mit.edu --recv-keys "$GPG_KEY" \
+      || gpg -v --keyserver keyserver.pgp.com --recv-keys "$GPG_KEY"
+    gpg --batch --verify elasticsearch.tar.gz.asc elasticsearch.tar.gz
+    rm -rf "$GNUPGHOME" elasticsearch.tar.gz.asc || true
+    tar -xf elasticsearch.tar.gz
+    ls -lah
+    mv elasticsearch-$VERSION /usr/share/elasticsearch
+    adduser -D -h /usr/share/elasticsearch elasticsearch
+    for path in \
+      /usr/share/elasticsearch/data \
+      /usr/share/elasticsearch/logs \
+      /usr/share/elasticsearch/config \
+      /usr/share/elasticsearch/config/scripts \
+      /usr/share/elasticsearch/tmp \
+      /usr/share/elasticsearch/plugins ; do \
+      mkdir -p "$path"
+      chown -R elasticsearch:elasticsearch "$path"
+    done
+    rm -rf /tmp/* /usr/share/elasticsearch/jdk
+    # remove X-Pack ML, it won't work on Alpine
+    rm -rf /usr/share/elasticsearch/modules/x-pack-ml/platform/linux-x86_64
+    cat << EOT > /usr/share/elasticsearch/config/elasticsearch.yml
+cluster.name: ${FQDN}
+network.host: 0.0.0.0
+discovery.zen.minimum_master_nodes: 1
+bootstrap.memory_lock: true
+
+node.master: true
+node.ingest: true
+node.data: true
+
+discovery.type: "single-node"
+xpack.ml.enabled: false
+xpack.security.enabled: true
+EOT
+    cat << EOT > /usr/share/elasticsearch/config/log4j2.properties
+rootLogger.level = info
+rootLogger.appenderRef.console.ref = console
+appender.console.type = Console
+appender.console.name = console
+appender.console.layout.type = PatternLayout
+appender.console.layout.pattern = [%d{ISO8601}][%-5p][%-25c] [%test_thread_info]%marker %m%n
+EOT
+    cat << EOT > /etc/logrotate.d/elasticsearch
+/var/log/elasticsearch/*.log {
+    daily
+    rotate 50
+    size 50M
+    copytruncate
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 644 elasticsearch elasticsearch
+}
+EOT
+    cat << EOT > /usr/local/bin/healthcheck
+#!/bin/sh
+host="$(hostname -i || echo '127.0.0.1')"
+if health="$(curl -fsSL "http://$host:9200/_cat/health?h=status")"; then
+	health="$(echo "$health" | sed -r 's/^[[:space:]]+|[[:space:]]+$//g')"
+	if [ "$health" = 'green' ]; then
+		exit 0
+	fi
+	echo >&2 "unexpected health status: $health"
+fi
+exit 2
+EOT
+    chown -R elasticsearch: /usr/share/elasticsearch
+    chmod +x /usr/share/elasticsearch/bin/*
+    cd /usr/share/elasticsearch
+    if [[ -n "$ELASTIC_PASSWORD" ]]; then
+        [[ -f config/elasticsearch.keystore ]] || elasticsearch-keystore create
+        echo "$ELASTIC_PASSWORD" | elasticsearch-keystore add -x 'bootstrap.password'
+    fi
+    elasticsearch-plugin list -s
+    sysctl -w vm.max_map_count=262144
+    chown -R elasticsearch: /run/elasticsearch /var/lib/elasticsearch /var/log/elasticsearch /usr/share/elasticsearch
+    su-exec elasticsearch elasticsearch --daemonize --pidfile /run/elasticsearch/pid >/var/log/elasticsearch/out.log 2>/var/log/elasticsearch/error.log
+    netstat -ltn
+    cd ${cwd}
+    apk del gnupg wget
+    # datadir: /usr/share/elasticsearch/data
+}
+function install() {
+    setup_hostname ${FQDN}
+    harden_ssh
+    cat << EOT > /etc/ssh/banner
+ _____      _       _       _ __
+/__   \_ __(_)_   _(_) __ _| / _\ ___  ___
+  / /\/ '__| \ \ / / |/ _\` | \ \ / _ \/ __|
+ / /  | |  | |\ V /| | (_| | |\ \  __/ (__
+ \/   |_|  |_| \_/ |_|\__,_|_\__/\___|\___|
+EOT
+    export PATH="$PATH:/usr/share/elasticsearch/bin:/root/.local/bin"
+    echo 'export PATH="$PATH:/usr/share/elasticsearch/bin:/root/.local/bin"' >> ~/.profile
+    echo -e 'w\necho\niostat\necho\nmpstat\necho\ndf\nfree\ndig +short myip.opendns.com @resolver1.opendns.com' >> ~/.profile
+    setup_swap ${LINODE_RAM}
+    setup_timezone UTC
+    patch_os
+    enable_auto_updates
+    add_packages
+    enable_fail2ban
+    setup_aws
+    es_configure
+    setup_firewall $(network_interface) 22 ${ES_PORT}
+    echo "Stackscript finished"
+
+}
+
+install
+rc-status
+stackscript_cleanup
+echo $(date +'%F') > /root/.deployed
+echo "Installation complete!"
