@@ -10,24 +10,28 @@ help: ## This help.
 .DEFAULT_GOAL := help
 
 init: ## Runs tf init tf
-	cd es
+	cd plans
 	terraform init -reconfigure -upgrade=true
 
-deploy: plan apply ## tf plan and apply -auto-approve -refresh=true
+output:
+	cd plans
+	terraform output linode_password
+
+deploy: plan apply output ## tf plan and apply -auto-approve -refresh=true
 
 plan: init ## Runs tf validate and tf plan
-	cd es
+	cd plans
 	terraform init -reconfigure -upgrade=true
 	terraform validate
 	terraform plan -no-color -out=.tfplan
 	terraform show --json .tfplan | jq -r '([.resource_changes[]?.change.actions?]|flatten)|{"create":(map(select(.=="create"))|length),"update":(map(select(.=="update"))|length),"delete":(map(select(.=="delete"))|length)}' > tfplan.json
 
 apply: ## tf apply -auto-approve -refresh=true
-	cd es
+	cd plans
 	terraform apply -auto-approve -refresh=true .tfplan
 
 destroy: init ## tf destroy -auto-approve
-	cd es
+	cd plans
 	terraform validate
 	terraform plan -destroy -no-color -out=.tfdestroy
 	terraform show --json .tfdestroy | jq -r '([.resource_changes[]?.change.actions?]|flatten)|{"create":(map(select(.=="create"))|length),"update":(map(select(.=="update"))|length),"delete":(map(select(.=="delete"))|length)}' > tfdestroy.json

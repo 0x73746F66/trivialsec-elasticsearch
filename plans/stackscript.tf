@@ -6,5 +6,8 @@ resource "linode_stackscript" "es" {
   description = "Installs Elasticsearch"
   script = data.local_file.alpine_es.content
   images = [local.linode_default_image]
-  rev_note = "v2"
+  rev_note = "v3"
+}
+output "stackscript_id" {
+  value = linode_stackscript.es.id
 }

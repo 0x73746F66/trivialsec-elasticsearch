@@ -9,14 +9,14 @@ resource "random_string" "linode_es_password" {
 resource "linode_instance" "es" {
   label             = local.es_hostname
   group             = "SaaS"
-  tags              = ["SaaS"]
+  tags              = ["Database", "Shared"]
   region            = local.linode_default_region
   type              = local.linode_default_type
   image             = local.linode_default_image
   authorized_keys   = length(var.public_key) == 0 ? [] : [
     var.public_key
   ]
-  authorized_users  = [
+  authorized_users  = length(var.allowed_linode_username) == 0 ? [] : [
     var.allowed_linode_username
   ]
   root_pass         = random_string.linode_es_password.result
@@ -40,4 +40,11 @@ resource "linode_instance" "es" {
       network_out    = 10
       transfer_quota = 80
   }
+}
+output "es_id" {
+  value = linode_instance.es.id
+}
+output "linode_password" {
+  sensitive = true
+  value = random_string.es_password.result
 }
