@@ -5,5 +5,5 @@ locals {
     linode_default_image    = "linode/alpine3.14"
     linode_default_type     = "g6-standard-1"
     route53_hosted_zone     = "Z04169281YCJD2GS4F5ER"
-    es_hostname          = "prd-es.trivialsec.com"
+    es_hostname             = "prd-es.trivialsec.com"
 }

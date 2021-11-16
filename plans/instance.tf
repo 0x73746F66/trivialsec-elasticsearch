@@ -24,7 +24,7 @@ resource "linode_instance" "es" {
   stackscript_data  = {
     "FQDN"                  = local.es_hostname
     "ELASTIC_PASSWORD"      = random_string.es_password.result
-    "ES_PORT"               = 9200
+    "ES_PORT"               = 8888
     "AWS_REGION"            = local.aws_default_region
     "AWS_ACCESS_KEY_ID"     = var.aws_access_key_id
     "AWS_SECRET_ACCESS_KEY" = var.aws_secret_access_key
@@ -43,6 +43,12 @@ resource "linode_instance" "es" {
 }
 output "es_id" {
   value = linode_instance.es.id
+}
+output "es_ipv4" {
+  value = [for ip in linode_instance.es.ipv4 : join("/", [ip, "32"])]
+}
+output "es_ipv6" {
+  value = linode_instance.es.ipv6
 }
 output "linode_password" {
   sensitive = true

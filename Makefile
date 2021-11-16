@@ -17,7 +17,7 @@ output:
 	cd plans
 	terraform output linode_password
 
-deploy: plan apply output ## tf plan and apply -auto-approve -refresh=true
+deploy: plan apply attach-firewall output ## tf plan and apply -auto-approve -refresh=true
 
 plan: init ## Runs tf validate and tf plan
 	cd plans

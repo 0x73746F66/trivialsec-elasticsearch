@@ -36,10 +36,6 @@ CREDS
     # Test AWS Credentials stored in Env vars
     echo $(aws sts get-caller-identity)
 }
-function install_es() {
-    echo "Installing elasticsearch..."
-
-}
 function es_configure() {
     echo "Configuring elasticsearch..."
     apk -q add --update gnupg wget openjdk11-jre-headless bash su-exec
@@ -60,10 +56,8 @@ function es_configure() {
     fi
     wget -q -O elasticsearch.tar.gz.asc "$ES_TARBALL_ASC"
     gpg --batch --quick-generate-key --passphrase="$ELASTIC_PASSWORD" "$FQDN" rsa1024 cert never
-    gpg -v --keyserver ha.pool.sks-keyservers.net --recv-keys "$GPG_KEY" \
-      || gpg -v --keyserver p80.pool.sks-keyservers.net --recv-keys "$GPG_KEY" \
+    gpg -v --keyserver pgpkeys.mit.edu --recv-keys "$GPG_KEY" \
       || gpg -v --keyserver pgp.mit.edu --recv-keys "$GPG_KEY" \
-      || gpg -v --keyserver pgpkeys.mit.edu --recv-keys "$GPG_KEY" \
       || gpg -v --keyserver keyserver.pgp.com --recv-keys "$GPG_KEY"
     gpg --batch --verify elasticsearch.tar.gz.asc elasticsearch.tar.gz
     rm -rf "$GNUPGHOME" elasticsearch.tar.gz.asc || true
@@ -86,6 +80,7 @@ function es_configure() {
     rm -rf ${ES_HOME}/modules/x-pack-ml/platform/linux-x86_64
     cat << EOT > ${ES_HOME}/config/elasticsearch.yml
 cluster.name: ${FQDN}
+http.port: ${ES_PORT}
 network.host: 0.0.0.0
 discovery.zen.minimum_master_nodes: 1
 bootstrap.memory_lock: true
