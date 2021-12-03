@@ -72,10 +72,10 @@ docker-purge: ## thorough docker environment cleanup
 	sudo service docker start
 
 es-unknown-sources:
-	curl --location --request GET 'http://elastic:${ELASTIC_PASSWORD}@localhost:9200/_search' --header 'Content-Type: application/json' --data-raw '{"query": {"match": {"assigner": "Unknown"}}}' | jq '.hits.hits[]._id'
+	curl --location --request GET 'http://elastic:${TF_VAR_elasticsearch_password}@localhost:9200/_search' --header 'Content-Type: application/json' --data-raw '{"query": {"match": {"assigner": "Unknown"}}}' | jq '.hits.hits[]._id'
 
 es-cves:
-	curl --location --request GET 'http://elastic:${ELASTIC_PASSWORD}@localhost:9200/cves/_stats' | jq -CS
+	curl --location --request GET 'http://elastic:${TF_VAR_elasticsearch_password}@localhost:9200/cves/_stats' | jq -CS
 
 update: ## pulls images
 	docker-compose pull
